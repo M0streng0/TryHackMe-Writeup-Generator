@@ -1,39 +1,73 @@
 #!/usr/bin/env python3
-import requests
+import logging
+
+# Initialize logging
+logging.basicConfig(filename='scraping.log', level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
+console_handler = logging.StreamHandler()  # Add a handler to log to the terminal
+console_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
+console_handler.setFormatter(formatter)
+logger = logging.getLogger('')
+logger.addHandler(console_handler)
+
+import re
+import tkinter as tk
+from tkinter import filedialog
 from datetime import datetime
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-import tkinter as tk
-from tkinter import filedialog
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
+import time
 
-# Function to fetch the challenge page content using Selenium
+# Configuration
+USERNAME = "Henrique Oliveira - M0streng0"
+MARKDOWN_FILE_EXTENSION = ".md"
+MARKDOWN_FILE_TYPE = [("Markdown Files", "*" + MARKDOWN_FILE_EXTENSION)]
+
+# Function to fetch the challenge page content using Selenium with headless Chrome
 def fetch_challenge_page_selenium(challenge_url):
-    driver = webdriver.Chrome()  # Change this to the appropriate driver for your browser
-    driver.get(challenge_url)
-    
-    # Find all elements with the class "class-link" and set aria-expanded to "true"
-    topic_elements = driver.find_elements(By.CLASS_NAME, 'class-link')
-    for topic_element in topic_elements:
-        driver.execute_script("arguments[0].setAttribute('aria-expanded', 'true');", topic_element)
-    
-    challenge_html = driver.page_source
-    driver.quit()
-    
-    return challenge_html
+    try:
+        # Check if the URL is from TryHackMe
+        if not re.match(r'^https://tryhackme\.com', challenge_url):
+            logging.error("The provided URL does not appear to be from TryHackMe.")
+            return None
+
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get(challenge_url)
+
+        # Find all elements with the class "class-link" and wait for a short time
+        time.sleep(3)  # Adjust the sleep duration as needed
+        topic_elements = driver.find_elements(By.CLASS_NAME, 'class-link')
+
+        for topic_element in topic_elements:
+            driver.execute_script("arguments[0].setAttribute('aria-expanded', 'true');", topic_element)
+
+        challenge_html = driver.page_source
+        driver.quit()
+
+        return challenge_html
+    except WebDriverException as e:
+        logging.error(f"Error while fetching challenge page: {e}")
+        logging.error("Please make sure the provided URL is valid.")
+        return None
 
 # Function to parse the challenge page and extract relevant information
 def parse_challenge_page(challenge_html):
     soup = BeautifulSoup(challenge_html, 'html.parser')
 
     # Extract the challenge title from the HTML title tag
-    challenge_title = (soup.find('title').text.strip()).replace("|","\\|")
+    challenge_title = (soup.find('title').text.strip()).replace("|", "\\|")
 
     # Extract the tasks
     tasks = []
     task_elements = soup.find_all('div', {'class': 'card-header task-header'})
     for task_element in task_elements:
-        task_title = (task_element.find('a', {'class': 'card-link'}).text.strip()).replace("                              "," : ")
+        task_title = (task_element.find('a', {'class': 'card-link'}).text.strip()).replace(" " * 30, " : ")
         tasks.append({'title': task_title})
 
     # Extract the questions
@@ -48,21 +82,15 @@ def parse_challenge_page(challenge_html):
 
 # Function to generate a markdown writeup
 def generate_markdown_writeup(challenge_title, tasks, questions):
-    # Get the current date and time
-    current_datetime = datetime.now()
-    formatted_datetime = current_datetime.strftime("%H:%M %d-%m-%y")
-    message = "Henrique Oliveira - M0streng0"
-    markdown_writeup = f"{formatted_datetime} \\| {message}\n\n"
-
+    formatted_datetime = datetime.now().strftime("%H:%M %d-%m-%y")
+    markdown_writeup = f"{formatted_datetime} \\| {USERNAME}\n\n"
     markdown_writeup += f"# {challenge_title}\n\n"
 
     for i, task in enumerate(tasks, start=1):
         markdown_writeup += f"## {task['title']}\n"
         task_questions = questions[i - 1]  # Get the questions for the current task
         for j, question in enumerate(task_questions, start=1):
-            markdown_writeup += f"### Question {j}\n"
-            markdown_writeup += f"{question}\n\n"
-            markdown_writeup += "```\n\n```\n\n> \n\n"
+            markdown_writeup += f"### Question {j}\n\n{question}\n\n```\n\n```\n\n> \n\n"
 
     return markdown_writeup
 
@@ -70,21 +98,25 @@ def generate_markdown_writeup(challenge_title, tasks, questions):
 def save_file(markdown_writeup):
     root = tk.Tk()
     root.withdraw()  # Hide the main window
-    file_path = filedialog.asksaveasfilename(initialfile="README",defaultextension=".md", filetypes=[("Markdown Files", "*.md")])
+    file_path = filedialog.asksaveasfilename(initialfile="README", defaultextension=MARKDOWN_FILE_EXTENSION,
+                                             filetypes=[("Markdown Files", "*" + MARKDOWN_FILE_EXTENSION)])
     if file_path:
         with open(file_path, "w") as file:
             file.write(markdown_writeup)
-        print(f"Markdown writeup saved to: {file_path}")
+        logging.info(f"Markdown writeup saved to: {file_path}")
     else:
-        print("Markdown writeup not saved.")
+        logging.warning("Markdown writeup not saved.")
 
 if __name__ == "__main__":
-    challenge_url = input("Enter the TryHackMe challenge URL: ")
-    challenge_html = fetch_challenge_page_selenium(challenge_url)
+    try:
+        challenge_url = input("Enter the TryHackMe challenge URL: ")
+        challenge_html = fetch_challenge_page_selenium(challenge_url)
 
-    if challenge_html:
-        challenge_title, tasks, questions = parse_challenge_page(challenge_html)
-        markdown_writeup = generate_markdown_writeup(challenge_title, tasks, questions)
+        if challenge_html:
+            challenge_title, tasks, questions = parse_challenge_page(challenge_html)
+            markdown_writeup = generate_markdown_writeup(challenge_title, tasks, questions)
 
-        # Ask the user where to save the file
-        save_file(markdown_writeup)
+            # Ask the user where to save the file
+            save_file(markdown_writeup)
+    except KeyboardInterrupt:
+        logging.info("Script execution interrupted by the user.")
